@@ -163,7 +163,6 @@ async fn main_by_cmd(args: Option<Args>) -> anyhow::Result<()> {
             password,
             mtu,
             filter,
-            log_enabled,
             ..
         } = args;
         let mut split = local.split('/');
