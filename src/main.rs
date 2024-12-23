@@ -8,7 +8,7 @@ use std::net::Ipv4Addr;
 #[cfg(feature = "web")]
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use std::net::{ToSocketAddrs, SocketAddr};
+use std::net::ToSocketAddrs;
 use tokio::net::TcpStream;
 
 mod config;
@@ -84,6 +84,10 @@ struct Args {
     #[cfg(feature = "web")]
     #[arg(long)]
     password: Option<String>,
+
+    /// Enable logging
+    #[arg(long)]
+    log_enabled: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -121,40 +125,40 @@ const LISTEN_PORT_STR: &str = "23333";
 const DEFAULT_ALGORITHM: &str = "chacha20-poly1305";
 
 pub fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    if std::env::args().count() == 1 {
-        block_on(2, main_by_cmd(None))
-    } else {
-        let args = match Args::try_parse() {
-            Ok(arg) => arg,
-            Err(e) => {
-                if let Ok(args) = ArgsConfig::try_parse() {
-                    let file_config = FileConfigView::read_file(&args.config)?;
-                    let worker_threads = file_config.threads;
-                    return block_on(worker_threads, main_by_config_file(file_config));
-                }
-
-                if let Ok(args) = ArgsApiConfig::try_parse() {
-                    return block_on(
-                        args.threads,
-                        start_by_config(
-                            None,
-                            #[cfg(feature = "web")]
-                            Some(SocketAddr::from_str(&args.api_addr)?),
-                            #[cfg(feature = "web")]
-                            Some(args.username),
-                            #[cfg(feature = "web")]
-                            Some(args.password),
-                        ),
-                    );
-                }
-                println!("{e}");
-                return Ok(());
+    let args = match Args::try_parse() {
+        Ok(arg) => arg,
+        Err(e) => {
+            if let Ok(args) = ArgsConfig::try_parse() {
+                let file_config = FileConfigView::read_file(&args.config)?;
+                let worker_threads = file_config.threads;
+                return block_on(worker_threads, main_by_config_file(file_config));
             }
-        };
-        let worker_threads = args.threads;
-        block_on(worker_threads, main_by_cmd(Some(args)))
+
+            if let Ok(args) = ArgsApiConfig::try_parse() {
+                return block_on(
+                    args.threads,
+                    start_by_config(
+                        None,
+                        #[cfg(feature = "web")]
+                        Some(SocketAddr::from_str(&args.api_addr)?),
+                        #[cfg(feature = "web")]
+                        Some(args.username),
+                        #[cfg(feature = "web")]
+                        Some(args.password),
+                    ),
+                );
+            }
+            println!("{e}");
+            return Ok(());
+        }
+    };
+
+    if args.log_enabled {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     }
+
+    let worker_threads = args.threads;
+    block_on(worker_threads, main_by_cmd(Some(args)))
 }
 
 fn block_on<F: Future>(worker_threads: usize, f: F) -> F::Output {
@@ -196,6 +200,7 @@ async fn main_by_cmd(args: Option<Args>) -> anyhow::Result<()> {
             password,
             mtu,
             filter,
+            log_enabled,
             ..
         } = args;
         let mut split = local.split('/');
