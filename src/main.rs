@@ -124,23 +124,6 @@ const LISTEN_PORT: u16 = 23333;
 const LISTEN_PORT_STR: &str = "23333";
 const DEFAULT_ALGORITHM: &str = "chacha20-poly1305";
 
-fn block_on<F: Future>(worker_threads: usize, f: F) -> F::Output {
-    if worker_threads <= 1 {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(f)
-    } else {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(worker_threads)
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(f)
-    }
-}
-
 async fn main_by_cmd(args: Option<Args>) -> anyhow::Result<()> {
     if let Some(args) = args {
         let Args {
@@ -340,22 +323,25 @@ async fn main() -> anyhow::Result<()> {
             if let Ok(args) = ArgsConfig::try_parse() {
                 let file_config = FileConfigView::read_file(&args.config)?;
                 let worker_threads = file_config.threads;
-                return block_on(worker_threads, main_by_config_file(file_config));
+                tokio::spawn(async move {
+                    main_by_config_file(file_config).await.unwrap();
+                }).await.unwrap();
+                return Ok(());
             }
 
             if let Ok(args) = ArgsApiConfig::try_parse() {
-                return block_on(
-                    args.threads,
+                tokio::spawn(async move {
                     start_by_config(
                         None,
                         #[cfg(feature = "web")]
-                        Some(SocketAddr::from_str(&args.api_addr)?),
+                        Some(SocketAddr::from_str(&args.api_addr).unwrap()),
                         #[cfg(feature = "web")]
                         Some(args.username),
                         #[cfg(feature = "web")]
                         Some(args.password),
-                    ),
-                );
+                    ).await.unwrap();
+                }).await.unwrap();
+                return Ok(());
             }
             println!("{e}");
             return Ok(());
@@ -367,5 +353,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let worker_threads = args.threads;
-    block_on(worker_threads, main_by_cmd(Some(args)))
+    tokio::spawn(async move {
+        main_by_cmd(Some(args)).await.unwrap();
+    }).await.unwrap();
+    Ok(())
 }
