@@ -124,43 +124,6 @@ const LISTEN_PORT: u16 = 23333;
 const LISTEN_PORT_STR: &str = "23333";
 const DEFAULT_ALGORITHM: &str = "chacha20-poly1305";
 
-pub fn main() -> anyhow::Result<()> {
-    let args = match Args::try_parse() {
-        Ok(arg) => arg,
-        Err(e) => {
-            if let Ok(args) = ArgsConfig::try_parse() {
-                let file_config = FileConfigView::read_file(&args.config)?;
-                let worker_threads = file_config.threads;
-                return block_on(worker_threads, main_by_config_file(file_config));
-            }
-
-            if let Ok(args) = ArgsApiConfig::try_parse() {
-                return block_on(
-                    args.threads,
-                    start_by_config(
-                        None,
-                        #[cfg(feature = "web")]
-                        Some(SocketAddr::from_str(&args.api_addr)?),
-                        #[cfg(feature = "web")]
-                        Some(args.username),
-                        #[cfg(feature = "web")]
-                        Some(args.password),
-                    ),
-                );
-            }
-            println!("{e}");
-            return Ok(());
-        }
-    };
-
-    if args.log_enabled {
-        env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    }
-
-    let worker_threads = args.threads;
-    block_on(worker_threads, main_by_cmd(Some(args)))
-}
-
 fn block_on<F: Future>(worker_threads: usize, f: F) -> F::Output {
     if worker_threads <= 1 {
         tokio::runtime::Builder::new_current_thread()
@@ -372,15 +335,38 @@ async fn connect_to_domain(domain: &str) -> anyhow::Result<TcpStream> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let domain = "example.com";
-    match connect_to_domain(domain).await {
-        Ok(stream) => {
-            println!("Successfully connected to {}", stream.peer_addr()?);
-            // 在这里处理连接
-        }
+    let args = match Args::try_parse() {
+        Ok(arg) => arg,
         Err(e) => {
-            println!("Failed to connect: {}", e);
+            if let Ok(args) = ArgsConfig::try_parse() {
+                let file_config = FileConfigView::read_file(&args.config)?;
+                let worker_threads = file_config.threads;
+                return block_on(worker_threads, main_by_config_file(file_config));
+            }
+
+            if let Ok(args) = ArgsApiConfig::try_parse() {
+                return block_on(
+                    args.threads,
+                    start_by_config(
+                        None,
+                        #[cfg(feature = "web")]
+                        Some(SocketAddr::from_str(&args.api_addr)?),
+                        #[cfg(feature = "web")]
+                        Some(args.username),
+                        #[cfg(feature = "web")]
+                        Some(args.password),
+                    ),
+                );
+            }
+            println!("{e}");
+            return Ok(());
         }
+    };
+
+    if args.log_enabled {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     }
-    Ok(())
+
+    let worker_threads = args.threads;
+    block_on(worker_threads, main_by_cmd(Some(args)))
 }
