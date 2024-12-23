@@ -3,12 +3,10 @@ use crate::service::ApiService;
 use clap::Parser;
 use env_logger::Env;
 use netlink_http::{Config, ConfigBuilder, HttpUserInfo, PeerAddress};
-use std::future::Future;
 use std::net::Ipv4Addr;
 #[cfg(feature = "web")]
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use std::net::ToSocketAddrs;
 use tokio::net::TcpStream;
 
 mod config;
@@ -211,11 +209,6 @@ async fn main_by_cmd(args: Option<Args>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn resolve_domain(domain: &str) -> Option<SocketAddr> {
-    let addrs: Vec<SocketAddr> = (domain, 0).to_socket_addrs().ok()?.collect();
-    addrs.into_iter().find(|addr| matches!(addr, SocketAddr::V4(_)))
-}
-
 async fn main_by_config_file(file_config: FileConfigView) -> anyhow::Result<()> {
     #[cfg(feature = "web")]
     let addr = if file_config.api_disable {
@@ -290,31 +283,6 @@ async fn start_by_config(
     Ok(())
 }
 
-async fn connect_to_domain(domain: &str) -> anyhow::Result<TcpStream> {
-    let addrs: Vec<SocketAddr> = (domain, 0).to_socket_addrs()?
-        .collect();
-    
-    if let Some(ipv6_addr) = addrs.iter().find(|addr| matches!(addr, SocketAddr::V6(_))) {
-        if let Ok(stream) = TcpStream::connect(ipv6_addr).await {
-            println!("Connected to IPv6 address: {}", ipv6_addr);
-            return Ok(stream);
-        } else {
-            println!("Failed to connect to IPv6 address: {}", ipv6_addr);
-        }
-    }
-
-    if let Some(ipv4_addr) = addrs.iter().find(|addr| matches!(addr, SocketAddr::V4(_))) {
-        if let Ok(stream) = TcpStream::connect(ipv4_addr).await {
-            println!("Connected to IPv4 address: {}", ipv4_addr);
-            return Ok(stream);
-        } else {
-            println!("Failed to connect to IPv4 address: {}", ipv4_addr);
-        }
-    }
-
-    Err(anyhow::anyhow!("Failed to connect to any address for domain: {}", domain))
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = match Args::try_parse() {
@@ -322,7 +290,6 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => {
             if let Ok(args) = ArgsConfig::try_parse() {
                 let file_config = FileConfigView::read_file(&args.config)?;
-                let worker_threads = file_config.threads;
                 tokio::spawn(async move {
                     main_by_config_file(file_config).await.unwrap();
                 }).await.unwrap();
@@ -352,7 +319,6 @@ async fn main() -> anyhow::Result<()> {
         env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     }
 
-    let worker_threads = args.threads;
     tokio::spawn(async move {
         main_by_cmd(Some(args)).await.unwrap();
     }).await.unwrap();
