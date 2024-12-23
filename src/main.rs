@@ -8,6 +8,8 @@ use std::net::Ipv4Addr;
 #[cfg(feature = "web")]
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
+use std::net::{ToSocketAddrs, SocketAddr};
+use tokio::net::TcpStream;
 
 mod config;
 #[cfg(feature = "web")]
@@ -259,6 +261,11 @@ async fn main_by_cmd(args: Option<Args>) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn resolve_domain(domain: &str) -> Option<SocketAddr> {
+    let addrs: Vec<SocketAddr> = (domain, 0).to_socket_addrs().ok()?.collect();
+    addrs.into_iter().find(|addr| matches!(addr, SocketAddr::V4(_)))
+}
+
 async fn main_by_config_file(file_config: FileConfigView) -> anyhow::Result<()> {
     #[cfg(feature = "web")]
     let addr = if file_config.api_disable {
@@ -330,5 +337,45 @@ async fn start_by_config(
     _ = quit.recv().await;
     _ = api_service.close();
     log::info!("exit!!!!");
+    Ok(())
+}
+
+async fn connect_to_domain(domain: &str) -> anyhow::Result<TcpStream> {
+    let addrs: Vec<SocketAddr> = (domain, 0).to_socket_addrs()?
+        .collect();
+    
+    if let Some(ipv6_addr) = addrs.iter().find(|addr| matches!(addr, SocketAddr::V6(_))) {
+        if let Ok(stream) = TcpStream::connect(ipv6_addr).await {
+            println!("Connected to IPv6 address: {}", ipv6_addr);
+            return Ok(stream);
+        } else {
+            println!("Failed to connect to IPv6 address: {}", ipv6_addr);
+        }
+    }
+
+    if let Some(ipv4_addr) = addrs.iter().find(|addr| matches!(addr, SocketAddr::V4(_))) {
+        if let Ok(stream) = TcpStream::connect(ipv4_addr).await {
+            println!("Connected to IPv4 address: {}", ipv4_addr);
+            return Ok(stream);
+        } else {
+            println!("Failed to connect to IPv4 address: {}", ipv4_addr);
+        }
+    }
+
+    Err(anyhow::anyhow!("Failed to connect to any address for domain: {}", domain))
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let domain = "example.com";
+    match connect_to_domain(domain).await {
+        Ok(stream) => {
+            println!("Successfully connected to {}", stream.peer_addr()?);
+            // 在这里处理连接
+        }
+        Err(e) => {
+            println!("Failed to connect: {}", e);
+        }
+    }
     Ok(())
 }
